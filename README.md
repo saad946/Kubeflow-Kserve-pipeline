@@ -95,7 +95,7 @@ kubectl port-forward -n kubeflow svc/ml-pipeline-ui 8080:80
 - Uploads model to S3
 - Returns model URI for KServe deployment
 
-### 7. Deploy InferenceService
+### 7. Deploy InferenceService (KServe)
 
 ```bash
 kubectl apply -n kserve-test -f - <<EOF

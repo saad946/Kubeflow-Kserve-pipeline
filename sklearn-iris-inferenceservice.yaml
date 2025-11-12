@@ -1,0 +1,25 @@
+apiVersion: "serving.kserve.io/v1beta1"
+kind: "InferenceService"
+metadata:
+  name: "sklearn-iris"
+  namespace: "kserve-test"
+  annotations:
+    autoscaling.knative.dev/target: "10"
+    autoscaling.knative.dev/minScale: "0"
+    autoscaling.knative.dev/maxScale: "10"
+    serving.kserve.io/enable-prometheus-scraping: "true"
+spec:
+  predictor:
+    canaryTrafficPercent: 0
+    model:
+      modelFormat:
+        name: sklearn
+      storageUri: "s3://kubeflow-iris-pipeline/models/iris/model_20251112_201850.joblib"
+      resources:
+        requests:
+          memory: 512Mi
+          cpu: 500m
+        limits:
+          memory: 1Gi
+          cpu: 1
+    serviceAccountName: sklearn-iris-sa

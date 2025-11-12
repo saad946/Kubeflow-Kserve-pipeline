@@ -45,7 +45,7 @@ kubectl delete pod -n kubeflow -l app=minio
 kubectl delete pod -n kubeflow -l app=ml-pipeline
 ```
 
-### 4. Install KServe
+### 4. Install KServe, CertManager, KNative and Istio
 
 ```bash
 curl -s "https://raw.githubusercontent.com/kserve/kserve/release-0.14/hack/quick_install.sh" | bash
@@ -68,7 +68,34 @@ kubectl create serviceaccount sklearn-iris-sa -n kserve-test
 kubectl patch serviceaccount sklearn-iris-sa -n kserve-test -p '{"secrets": [{"name": "aws-s3-credentials"}]}'
 ```
 
-### 6. Deploy InferenceService
+### 6. Build Kubeflow Pipeline
+
+```bash
+# Activate virtual environment
+source .kfp/bin/activate
+
+# Generate pipeline.yaml from pipeline.py
+python pipeline.py
+
+# Create pipeline in Kubeflow Pipelines
+kfp pipeline create -p IrisProject pipeline.yaml
+
+# Verify pipeline created
+kfp pipeline list
+
+# Access Kubeflow Pipelines UI
+kubectl port-forward -n kubeflow svc/ml-pipeline-ui 8080:80
+# Open: http://localhost:8080 to view and run pipelines
+```
+
+**What the Pipeline Does:**
+- Loads iris dataset
+- Preprocesses data (train/test split)
+- Trains LogisticRegression model
+- Uploads model to S3
+- Returns model URI for KServe deployment
+
+### 7. Deploy InferenceService
 
 ```bash
 kubectl apply -n kserve-test -f - <<EOF
@@ -100,7 +127,58 @@ spec:
 EOF
 ```
 
-### 7. Test Inference
+### 7. Build and Deploy Kubeflow Pipeline
+
+```bash
+# Activate virtual environment
+source .kfp/bin/activate
+
+# Create pipeline.py (or use existing)
+# Edit pipeline.py with your ML pipeline definition
+
+# Generate pipeline.yaml from pipeline.py
+python pipeline.py
+
+# Create pipeline in Kubeflow Pipelines
+kfp pipeline create -p IrisProject pipeline.yaml
+
+# List pipelines
+kfp pipeline list
+
+# Access Kubeflow Pipelines UI
+kubectl port-forward -n kubeflow svc/ml-pipeline-ui 8080:80
+# Open: http://localhost:8080
+```
+
+**Pipeline Components:**
+- Load data from CSV
+- Preprocess data (train/test split)
+- Train model (LogisticRegression)
+- Upload model to S3
+- Return model URI
+
+**Note:** The pipeline automatically handles S3 bucket name whitespace and uploads trained models to your S3 bucket.
+
+### 8. Run Pipeline and Deploy Model
+
+```bash
+# Run pipeline with parameters
+kfp run submit \
+  -e IrisProject \
+  -r iris-run-$(date +%Y%m%d-%H%M%S) \
+  -p IrisProject \
+  -f pipeline.yaml \
+  --param aws_access_key_id="YOUR_ACCESS_KEY" \
+  --param aws_secret_access_key="YOUR_SECRET_KEY" \
+  --param s3_bucket="kubeflow-iris-pipeline" \
+  --param s3_key="models/iris"
+
+# Monitor pipeline run in UI
+# After completion, note the model S3 path from outputs
+# Update InferenceService storageUri with the new model path
+```
+
+### 9. Test Inference
 
 ```bash
 # Create test input
@@ -320,11 +398,25 @@ kubectl port-forward -n monitoring svc/prometheus-kube-prometheus-prometheus 909
 
 ## Files
 
-- `pipeline.py` - ML pipeline definition
-- `pipeline.yaml` - Compiled pipeline
-- `iris-input.json` - Test input data
+- `pipeline.py` - ML pipeline definition (KFP DSL)
+- `pipeline.yaml` - Compiled pipeline (generated from pipeline.py)
+- `iris-input.json` - Test input data for InferenceService
 
 **Note:** All KServe YAML configurations are included inline in this README. No separate YAML files needed.
+
+## Kubeflow Pipeline Workflow
+
+**Pipeline Steps:**
+1. **Load Data** - Loads iris dataset from CSV
+2. **Preprocess Data** - Splits into train/test sets (80/20)
+3. **Train Model** - Trains LogisticRegression and uploads to S3
+4. **Output** - Returns S3 model URI for KServe deployment
+
+**Pipeline Features:**
+- Automatic S3 upload with timestamped model names
+- Handles whitespace in S3 bucket/key parameters
+- Returns model URI for direct use in KServe
+- Full ML workflow orchestration
 
 ## Quick Reference
 

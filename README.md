@@ -186,7 +186,37 @@ export INGRESS_PORT=$(kubectl -n istio-system get service istio-ingressgateway -
 kubectl create namespace kserve-test
 ```
 
-### Create InferenceService
+### Create AWS Credentials Secret (for S3 Access)
+
+Create a Kubernetes Secret with AWS credentials for S3 access:
+
+```bash
+# Create secret with AWS credentials from AWS CLI config
+kubectl create secret generic aws-s3-credentials \
+  --from-literal=AWS_ACCESS_KEY_ID=$(aws configure get aws_access_key_id) \
+  --from-literal=AWS_SECRET_ACCESS_KEY=$(aws configure get aws_secret_access_key) \
+  -n kserve-test
+
+# Or create manually with your credentials
+kubectl create secret generic aws-s3-credentials \
+  --from-literal=AWS_ACCESS_KEY_ID='your-access-key-id' \
+  --from-literal=AWS_SECRET_ACCESS_KEY='your-secret-access-key' \
+  -n kserve-test
+```
+
+### Create ServiceAccount for S3 Access
+
+Create a ServiceAccount that references the AWS credentials secret:
+
+```bash
+kubectl create serviceaccount sklearn-iris-sa -n kserve-test
+
+kubectl patch serviceaccount sklearn-iris-sa -n kserve-test -p '{"imagePullSecrets": [], "secrets": [{"name": "aws-s3-credentials"}]}'
+```
+
+### Create InferenceService with S3 Storage
+
+Replace `s3://kubeflow-iris-pipeline/models/iris/model_20251112_201850.joblib` with your actual S3 model path:
 
 ```bash
 kubectl apply -n kserve-test -f - <<EOF
@@ -199,9 +229,24 @@ spec:
     model:
       modelFormat:
         name: sklearn
-      storageUri: "gs://kfserving-examples/models/sklearn/1.0/model"
+      storageUri: "s3://kubeflow-iris-pipeline/models/iris/model_20251112_201850.joblib"
+      resources:
+        requests:
+          memory: 512Mi
+          cpu: 500m
+        limits:
+          memory: 1Gi
+          cpu: 1
+    serviceAccountName: sklearn-iris-sa
 EOF
 ```
+
+**Important Notes for S3:**
+- Use `storageUri` with `s3://` prefix pointing to your model file
+- Use `serviceAccountName` to reference the ServiceAccount that has access to AWS credentials
+- The ServiceAccount must reference the `aws-s3-credentials` secret
+- **Model File:** KServe sklearn server can load the model file directly (e.g., `model_20251112_201850.joblib`)
+- Ensure your S3 bucket and model file are accessible with the provided AWS credentials
 
 ### Check the InferenceService (May show READY: Unknown or False)
 
@@ -244,9 +289,9 @@ SERVICE_HOSTNAME=$(kubectl get inferenceservice sklearn-iris -n kserve-test -o j
 curl -v -H "Host: ${SERVICE_HOSTNAME}" -H "Content-Type: application/json" "http://${INGRESS_HOST}:${INGRESS_PORT}/v1/models/sklearn-iris:predict" -d @./iris-input.json
 ```
 
-**Expected response:** `{"predictions":[1,1]}`
+**Expected response:** `{"predictions":[2,2]}` (or similar predictions based on your model)
 
-**Note:** Predictions [1,1] mean both iris samples are classified as class 1 (versicolor).
+**Note:** The predictions depend on your trained model. For example, [2,2] means both iris samples are classified as class 2 (virginica).
 
 ### Issues Solved
 
@@ -259,6 +304,14 @@ curl -v -H "Host: ${SERVICE_HOSTNAME}" -H "Content-Type: application/json" "http
    - **Cause:** Large images (sklearnserver, storage-initializer) taking time to pull
    - **Fix:** Wait for images to finish pulling (normal behavior, takes 2-5 minutes)
    - **Verification:** Check pod events: `kubectl describe pod <pod-name> -n kserve-test`
+
+3. **KServe S3 Access Issues:**
+   - **Error:** `NoCredentialsError: Unable to locate credentials` in storage-initializer
+   - **Cause:** Storage-initializer init container cannot access AWS credentials
+   - **Fix:** 
+     - Create a ServiceAccount that references the AWS credentials secret
+     - Use `serviceAccountName` in the InferenceService spec (not `storageSecret` which doesn't exist)
+     - The ServiceAccount allows the storage-initializer to access the credentials
 
 ## 12. Verify Installation
 
